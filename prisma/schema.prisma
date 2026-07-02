@@ -1,0 +1,35 @@
+generator client {
+  provider      = "prisma-client"
+  output        = "../src/generated/prisma"
+  moduleFormat  = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FileType {
+  PROFILE_IMAGE
+  DNI_PDF
+  MEDICAL_RECORD
+  CONTRACT
+  OTHER
+}
+
+model UserFile {
+  id            String   @id @default(uuid())
+  userId        String
+  type          FileType
+  url           String
+  path          String?
+  originalName  String?
+  mimeType      String?
+  size          Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  available     Boolean  @default(true)
+
+  @@index([type])
+  @@index([available])
+  @@map("user_files")
+}

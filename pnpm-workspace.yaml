@@ -1,0 +1,5 @@
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@prisma/adapter-pg'
+  - prisma
+  - sharp

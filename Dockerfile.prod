@@ -1,0 +1,37 @@
+FROM node:24-alpine AS deps
+WORKDIR /usr/src/app
+RUN corepack enable && corepack prepare pnpm@10 --activate
+COPY package.json pnpm-lock.yaml ./
+COPY prisma ./prisma
+RUN pnpm install --frozen-lockfile
+
+
+
+
+FROM node:24-alpine AS build
+
+ARG STORAGE_DATABASE_URL
+ENV DATABASE_URL=$STORAGE_DATABASE_URL
+
+WORKDIR /usr/src/app
+RUN corepack enable && corepack prepare pnpm@10 --activate
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY --from=deps /usr/src/app/prisma ./prisma
+COPY . .
+RUN pnpm prisma migrate deploy
+RUN pnpm prisma generate
+RUN pnpm run build
+
+
+
+
+
+
+FROM node:24-alpine AS prod
+WORKDIR /usr/src/app
+COPY --from=build /usr/src/app/node_modules ./node_modules
+COPY --from=build /usr/src/app/dist ./dist
+ENV NODE_ENV=production
+USER node
+EXPOSE 3000
+CMD ["node", "dist/main.js"]
