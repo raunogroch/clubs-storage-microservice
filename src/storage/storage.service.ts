@@ -16,6 +16,10 @@ import { StorageRepository } from "./storage.repository";
 import { envs } from "../config";
 import { resolve } from "path";
 import { promises as fs } from "fs";
+import type {
+  UploadFilePayload,
+  StoredFileMetadata,
+} from "./types/upload-file.types";
 
 type ImageProcessor = {
   isAvailable(): boolean;
@@ -69,13 +73,19 @@ export class StorageService {
    * Upload a file with optional image resizing for profile images
    */
   async uploadFile(uploadFileDto: UploadFileDto): Promise<UploadFileResponse> {
-    const { userId, base64Data, buffer, mimeType, originalName, type } =
-      uploadFileDto;
+    const { userId, buffer, mimeType, originalName, type } = uploadFileDto;
 
-    // Validate input
-    this.validateUploadInput(userId, base64Data, buffer, type, mimeType);
+    const normalizedPayload: UploadFilePayload = {
+      userId,
+      mimeType,
+      originalName,
+      type,
+      buffer: this.resolveFileBuffer(buffer),
+    };
 
-    const fileBuffer = this.resolveFileBuffer(buffer, base64Data);
+    this.validateUploadInput(normalizedPayload);
+
+    const fileBuffer = normalizedPayload.buffer;
     const fileId = this.fileSystemManager.generateFileId();
     const folderName = this.fileSystemManager.getFolderName(type);
     const extension = this.mimeTypeResolver.resolveExtension(
@@ -125,42 +135,31 @@ export class StorageService {
       const filePath = this.resolveStoragePath(folderName, filename);
       this.logger.log(`Attempting to read file from: ${filePath}`);
 
-      let mimeType: string | undefined;
-      let userId: string | undefined;
-      let type: string | undefined;
-      try {
-        const meta = await this.storageRepository.findByFilename(filename);
-        mimeType = meta?.mimeType || undefined;
-        userId = meta?.userId || undefined;
-        type = meta?.type?.toString() || undefined;
-        this.logger.debug(
-          `Found metadata for ${filename}: mimeType=${mimeType}, userId=${userId}, type=${type}`,
-        );
-      } catch (dbError) {
-        this.logger.warn(
-          `Could not find metadata in DB for ${filename}, will use default MIME type`,
-        );
-      }
+      const [metadata, buffer] = await Promise.all([
+        this.loadFileMetadata(filename),
+        fs.readFile(filePath).catch((error) => {
+          this.logger.error(
+            `File not found at path: ${filePath}`,
+            (error as Error).message,
+          );
+          return null;
+        }),
+      ]);
 
-      try {
-        const buffer = await fs.readFile(filePath);
-        this.logger.log(
-          `Successfully read file ${filename} (${buffer.length} bytes)`,
-        );
-        return {
-          buffer,
-          mimeType: mimeType || "application/octet-stream",
-          size: buffer.length,
-          userId,
-          type,
-        };
-      } catch (fsError) {
-        this.logger.error(
-          `File not found at path: ${filePath}`,
-          (fsError as Error).message,
-        );
+      if (!buffer) {
         return null;
       }
+
+      this.logger.log(
+        `Successfully read file ${filename} (${buffer.length} bytes)`,
+      );
+      return {
+        buffer,
+        mimeType: metadata.mimeType || "application/octet-stream",
+        size: buffer.length,
+        userId: metadata.userId,
+        type: metadata.type,
+      };
     } catch (error) {
       this.logger.error(
         `Error retrieving file ${filename}`,
@@ -189,8 +188,8 @@ export class StorageService {
 
     const urls: ProfileImageUrls = { small: "", medium: "", large: "" };
     let largeFileResult: FileSaveResult | null = null;
+    const mimeType = this.mimeTypeResolver.getMimeTypeForResized();
 
-    // Process each size
     for (const size of this.profileImageSizes) {
       const resizeResult = await this.imageProcessor.resize(buffer, {
         width: size.width,
@@ -201,7 +200,7 @@ export class StorageService {
       const fileResult = await this.fileSystemManager.saveFile(
         `${fileId}_${size.suffix}`,
         resizeResult.buffer,
-        this.mimeTypeResolver.getMimeTypeForResized(),
+        mimeType,
         type,
         folderName,
         filename,
@@ -222,7 +221,7 @@ export class StorageService {
     return {
       id: fileId,
       urls,
-      mimeType: this.mimeTypeResolver.getMimeTypeForResized(),
+      mimeType,
       type,
       size: largeFileResult.size,
       createdAt: new Date(),
@@ -263,6 +262,27 @@ export class StorageService {
     };
   }
 
+  private async loadFileMetadata(filename: string) {
+    try {
+      const meta = await this.storageRepository.findByFilename(filename);
+      const metadata = {
+        mimeType: meta?.mimeType || undefined,
+        userId: meta?.userId || undefined,
+        type: meta?.type?.toString() || undefined,
+      };
+
+      this.logger.debug(
+        `Found metadata for ${filename}: mimeType=${metadata.mimeType}, userId=${metadata.userId}, type=${metadata.type}`,
+      );
+      return metadata;
+    } catch {
+      this.logger.warn(
+        `Could not find metadata in DB for ${filename}, will use default MIME type`,
+      );
+      return { mimeType: undefined, userId: undefined, type: undefined };
+    }
+  }
+
   private resolveStoragePath(folderName: string, filename: string): string {
     return resolve(process.cwd(), envs.storagePath, folderName, filename);
   }
@@ -270,13 +290,8 @@ export class StorageService {
   /**
    * Private method: Validate upload input
    */
-  private validateUploadInput(
-    userId: string,
-    base64Data: string | undefined,
-    buffer: Buffer | Uint8Array | undefined,
-    type: FileType,
-    mimeType: string,
-  ): void {
+  private validateUploadInput(payload: UploadFilePayload): void {
+    const { userId, mimeType, type, buffer } = payload;
     // Validate user ID
     const userValidation = this.fileValidator.validateUserId(userId);
     if (!userValidation.valid) {
@@ -296,30 +311,14 @@ export class StorageService {
     }
 
     // Validate file data
-    if (!buffer && !base64Data) {
+    if (!buffer) {
       throw new BadRequestException("File data is required");
-    }
-
-    if (buffer) {
-      return;
-    }
-
-    const base64Validation = this.fileValidator.validateBase64Data(base64Data!);
-    if (!base64Validation.valid) {
-      throw new BadRequestException(base64Validation.error);
     }
   }
 
-  private resolveFileBuffer(
-    buffer: Buffer | Uint8Array | undefined,
-    base64Data: string | undefined,
-  ): Buffer {
+  private resolveFileBuffer(buffer: Buffer | Uint8Array | undefined): Buffer {
     if (buffer) {
       return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
-    }
-
-    if (base64Data) {
-      return Buffer.from(base64Data, "base64");
     }
 
     throw new BadRequestException("File data is required");

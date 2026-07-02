@@ -50,8 +50,8 @@ export class FileSystemManagerService {
       userId,
       type,
     );
-    const targetPath = existingFile?.path || fullPath;
-    const targetUrl = existingFile?.url || publicUrl;
+    const targetPath = fullPath;
+    const targetUrl = publicUrl;
     const targetFolder = dirname(targetPath);
 
     // Create folder if it doesn't exist
