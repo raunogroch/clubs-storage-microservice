@@ -56,7 +56,7 @@ export class StorageService {
 
   // Profile image resize configurations
   private readonly profileImageSizes = [
-    { suffix: "small", width: 20 },
+    { suffix: "small", width: 50 },
     { suffix: "medium", width: 100 },
     { suffix: "large", width: 300 },
   ];
