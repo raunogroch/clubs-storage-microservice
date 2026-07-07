@@ -43,8 +43,7 @@ export class FileSystemManagerService {
   ): Promise<FileSaveResult> {
     const folder = resolve(process.cwd(), envs.storagePath, folderName);
     const fullPath = resolve(folder, filename);
-    const relativePath = `/storage/${folderName}/${filename}`;
-    const publicUrl = `${envs.gatewayBaseUrl}${relativePath}`;
+    const publicUrl = this.buildPublicFileUrl(folderName, filename);
 
     const existingFile = await this.storageRepository.findByUserAndType(
       userId,
@@ -99,6 +98,11 @@ export class FileSystemManagerService {
       mimeType,
       size: buffer.length,
     };
+  }
+
+  buildPublicFileUrl(folderName: string, filename: string): string {
+    const normalizedBaseUrl = envs.gatewayBaseUrl.replace(/\/$/, "");
+    return `${normalizedBaseUrl}/api/${folderName}/${filename}`;
   }
 
   /**
