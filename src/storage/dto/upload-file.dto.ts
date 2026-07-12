@@ -6,27 +6,17 @@ export class UploadFileDto {
   @IsNotEmpty()
   userId!: string;
 
-  @IsOptional()
-  base64Data?: string;
-
-  @IsOptional()
-  buffer?: Buffer | Uint8Array;
+  @IsString()
+  @IsNotEmpty()
+  base64Data!: string;
 
   @IsString()
   @IsNotEmpty()
   mimeType!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  originalName!: string;
 
   @IsNotEmpty()
   @IsEnum(FileType, {
     message: `type must be a valid type ${Object.values(FileType).join(", ")}`,
   })
   type!: FileType;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
 }

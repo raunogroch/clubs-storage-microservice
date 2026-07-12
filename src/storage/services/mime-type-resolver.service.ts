@@ -44,6 +44,14 @@ export class MimeTypeResolverService {
   }
 
   /**
+   * Resolve MIME type from filename extension when metadata is missing
+   */
+  getMimeTypeFromFilename(filename?: string): string | undefined {
+    if (!filename) return undefined;
+    return lookup(filename) || undefined;
+  }
+
+  /**
    * Resolve best extension from multiple sources
    * Priority: mimeType > filename > default
    */

@@ -14,7 +14,7 @@ import {
 } from "./services/file-system-manager.service";
 import { StorageRepository } from "./storage.repository";
 import { envs } from "../config";
-import { resolve } from "path";
+import { isAbsolute, resolve } from "path";
 import { promises as fs } from "fs";
 import type {
   UploadFilePayload,
@@ -73,25 +73,21 @@ export class StorageService {
    * Upload a file with optional image resizing for profile images
    */
   async uploadFile(uploadFileDto: UploadFileDto): Promise<UploadFileResponse> {
-    const { userId, buffer, mimeType, originalName, type } = uploadFileDto;
+    const { userId, base64Data, mimeType, type } = uploadFileDto;
 
+    const fileBuffer = this.decodeBase64File(base64Data);
     const normalizedPayload: UploadFilePayload = {
       userId,
       mimeType,
-      originalName,
       type,
-      buffer: this.resolveFileBuffer(buffer),
+      buffer: fileBuffer,
     };
 
     this.validateUploadInput(normalizedPayload);
 
-    const fileBuffer = normalizedPayload.buffer;
     const fileId = this.fileSystemManager.generateFileId();
     const folderName = this.fileSystemManager.getFolderName(type);
-    const extension = this.mimeTypeResolver.resolveExtension(
-      mimeType,
-      originalName,
-    );
+    const extension = this.mimeTypeResolver.resolveExtension(mimeType);
 
     // Handle profile image with resizing
     if (this.fileValidator.isImageTypeRequiringResize(type)) {
@@ -132,7 +128,10 @@ export class StorageService {
     type?: string;
   } | null> {
     try {
-      const filePath = this.resolveStoragePath(folderName, filename);
+      const filePath = await this.resolveExistingStoragePath(
+        folderName,
+        filename,
+      );
       this.logger.log(`Attempting to read file from: ${filePath}`);
 
       const [metadata, buffer] = await Promise.all([
@@ -153,9 +152,14 @@ export class StorageService {
       this.logger.log(
         `Successfully read file ${filename} (${buffer.length} bytes)`,
       );
+      const mimeType =
+        metadata.mimeType ||
+        this.mimeTypeResolver.getMimeTypeFromFilename(filename) ||
+        "application/octet-stream";
+
       return {
         buffer,
-        mimeType: metadata.mimeType || "application/octet-stream",
+        mimeType,
         size: buffer.length,
         userId: metadata.userId,
         type: metadata.type,
@@ -283,6 +287,50 @@ export class StorageService {
     }
   }
 
+  private async resolveExistingStoragePath(
+    folderName: string,
+    filename: string,
+  ): Promise<string> {
+    const candidates = this.getStoragePathCandidates(folderName, filename);
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        // Try next candidate
+      }
+    }
+
+    return this.resolveStoragePath(folderName, filename);
+  }
+
+  private getStoragePathCandidates(
+    folderName: string,
+    filename: string,
+  ): string[] {
+    const cwd = process.cwd();
+    const configuredPath = envs.storagePath || "./storage";
+    const candidates = new Set<string>();
+
+    candidates.add(resolve(cwd, configuredPath, folderName, filename));
+
+    if (!isAbsolute(configuredPath)) {
+      candidates.add(resolve(cwd, "..", configuredPath, folderName, filename));
+      candidates.add(
+        resolve(cwd, "..", "..", configuredPath, folderName, filename),
+      );
+    }
+
+    candidates.add(resolve(cwd, "..", "storage_data", folderName, filename));
+    candidates.add(resolve(cwd, "storage_data", folderName, filename));
+    candidates.add(
+      resolve(cwd, "..", "..", "storage_data", folderName, filename),
+    );
+
+    return Array.from(candidates);
+  }
+
   private resolveStoragePath(folderName: string, filename: string): string {
     return resolve(process.cwd(), envs.storagePath, folderName, filename);
   }
@@ -316,11 +364,18 @@ export class StorageService {
     }
   }
 
-  private resolveFileBuffer(buffer: Buffer | Uint8Array | undefined): Buffer {
-    if (buffer) {
-      return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  private decodeBase64File(base64Data: string): Buffer {
+    if (!base64Data || typeof base64Data !== "string") {
+      throw new BadRequestException("Base64 file data is required");
     }
 
-    throw new BadRequestException("File data is required");
+    const matches = base64Data.match(/^data:(.+);base64,(.+)$/i);
+    const normalizedBase64 = matches ? matches[2] : base64Data;
+
+    try {
+      return Buffer.from(normalizedBase64, "base64");
+    } catch {
+      throw new BadRequestException("Invalid base64 file data");
+    }
   }
 }

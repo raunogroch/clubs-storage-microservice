@@ -3,7 +3,6 @@ import { FileType } from "../enums/file-type.enum";
 export interface UploadFilePayload {
   userId: string;
   mimeType: string;
-  originalName: string;
   type: FileType;
   buffer: Buffer;
 }

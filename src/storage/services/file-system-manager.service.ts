@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { promises as fs } from "fs";
-import { dirname, resolve } from "path";
+import { dirname, isAbsolute, resolve } from "path";
 import { randomUUID } from "crypto";
 import { StorageRepository } from "../storage.repository";
 import { NatsClientService } from "../../transports/nats-client.service";
@@ -41,7 +41,7 @@ export class FileSystemManagerService {
     filename: string,
     userId: string,
   ): Promise<FileSaveResult> {
-    const folder = resolve(process.cwd(), envs.storagePath, folderName);
+    const folder = await this.resolveStorageFolderPath(folderName);
     const fullPath = resolve(folder, filename);
     const publicUrl = this.buildPublicFileUrl(folderName, filename);
 
@@ -98,6 +98,34 @@ export class FileSystemManagerService {
       mimeType,
       size: buffer.length,
     };
+  }
+
+  private async resolveStorageFolderPath(folderName: string): Promise<string> {
+    const cwd = process.cwd();
+    const configuredPath = envs.storagePath || "./storage";
+    const candidates = new Set<string>();
+
+    candidates.add(resolve(cwd, configuredPath, folderName));
+
+    if (!isAbsolute(configuredPath)) {
+      candidates.add(resolve(cwd, "..", configuredPath, folderName));
+      candidates.add(resolve(cwd, "..", "..", configuredPath, folderName));
+    }
+
+    candidates.add(resolve(cwd, "..", "storage_data", folderName));
+    candidates.add(resolve(cwd, "storage_data", folderName));
+    candidates.add(resolve(cwd, "..", "..", "storage_data", folderName));
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        // Try next candidate
+      }
+    }
+
+    return resolve(cwd, configuredPath, folderName);
   }
 
   buildPublicFileUrl(folderName: string, filename: string): string {
