@@ -132,7 +132,6 @@ export class StorageService {
         folderName,
         filename,
       );
-      this.logger.log(`Attempting to read file from: ${filePath}`);
 
       const [metadata, buffer] = await Promise.all([
         this.loadFileMetadata(filename),
@@ -149,9 +148,6 @@ export class StorageService {
         return null;
       }
 
-      this.logger.log(
-        `Successfully read file ${filename} (${buffer.length} bytes)`,
-      );
       const mimeType =
         metadata.mimeType ||
         this.mimeTypeResolver.getMimeTypeFromFilename(filename) ||

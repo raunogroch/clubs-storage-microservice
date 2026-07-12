@@ -54,8 +54,6 @@ export class StorageController {
     @Param("filename") filename: string,
     @Res() response: Response,
   ): Promise<void> {
-    this.logger.log(`Serving file: ${folderName}/${filename}`);
-
     const file = await this.storageService.getFile(folderName, filename);
 
     if (!file) {
