@@ -169,6 +169,112 @@ export class StorageService {
     }
   }
 
+  async getLatestFileForUser(
+    userId?: string,
+    fileType?: string,
+    size?: string,
+  ): Promise<{
+    buffer: Buffer;
+    mimeType: string;
+    size: number;
+    userId?: string;
+    type?: string;
+    filename?: string;
+  } | null> {
+    if (!userId || !fileType) {
+      return null;
+    }
+
+    const normalizedFileType = fileType.toUpperCase() as FileType;
+    const entity = await this.storageRepository.findByUserAndType(
+      userId,
+      normalizedFileType,
+    );
+
+    if (!entity?.path) {
+      return null;
+    }
+
+    const normalizedSize = this.normalizeProfileImageSize(size);
+    const filename = this.resolveRequestedFilename(entity, normalizedSize);
+    const filePath = this.resolveFilePath(entity.path, entity.url, filename);
+
+    try {
+      const buffer = await fs.readFile(filePath);
+      return {
+        buffer,
+        mimeType: entity.mimeType || "application/octet-stream",
+        size: buffer.length,
+        userId: entity.userId,
+        type: entity.type?.toString(),
+        filename,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error reading latest file for user ${userId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  private normalizeProfileImageSize(size?: string): string | undefined {
+    const normalized = size?.toLowerCase();
+    return normalized === "small" ||
+      normalized === "medium" ||
+      normalized === "large"
+      ? normalized
+      : undefined;
+  }
+
+  private resolveRequestedFilename(
+    entity: { path?: string | null; url?: string | null },
+    size?: string,
+  ): string | undefined {
+    const baseName = (entity.path || entity.url || "").split(/[\\/]/).pop();
+
+    if (!baseName) {
+      return undefined;
+    }
+
+    const extension = baseName.includes(".")
+      ? baseName.substring(baseName.lastIndexOf("."))
+      : "";
+
+    if (!size) {
+      return baseName;
+    }
+
+    const nameWithoutExtension = extension
+      ? baseName.slice(0, baseName.lastIndexOf(extension))
+      : baseName;
+    const existingSizeSuffix = ["small", "medium", "large"].find((suffix) =>
+      nameWithoutExtension.endsWith(`_${suffix}`),
+    );
+    const stem = existingSizeSuffix
+      ? nameWithoutExtension.slice(0, -existingSizeSuffix.length - 1)
+      : nameWithoutExtension;
+
+    return `${stem}_${size}${extension}`;
+  }
+
+  private resolveFilePath(
+    path: string | null | undefined,
+    url: string | null | undefined,
+    filename?: string,
+  ): string {
+    if (!path) {
+      const fallback = url?.split(/[\\/]/).pop() || "";
+      return resolve(process.cwd(), fallback);
+    }
+
+    if (filename) {
+      const directory = path.split(/[\\/]/).slice(0, -1).join("/");
+      return resolve(directory, filename);
+    }
+
+    return path;
+  }
+
   /**
    * Private method: Upload profile image with resizing
    */

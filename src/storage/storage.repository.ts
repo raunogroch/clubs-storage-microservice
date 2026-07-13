@@ -20,6 +20,9 @@ export class StorageRepository {
         userId,
         type: type as PrismaFileType,
       },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
   }
 

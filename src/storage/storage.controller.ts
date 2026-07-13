@@ -24,23 +24,31 @@ export class StorageController {
 
   @MessagePattern("storage.get_file")
   async getFileByMessage(
-    @Payload() payload: { folderName: string; filename: string },
+    @Payload()
+    payload: {
+      userId?: string;
+      fileType?: string;
+      size?: string;
+    },
   ) {
-    const file = await this.storageService.getFile(
-      payload.folderName,
-      payload.filename,
+    const targetType = payload.fileType?.toUpperCase();
+    const userFile = await this.storageService.getLatestFileForUser(
+      payload.userId,
+      targetType,
+      payload.size,
     );
 
-    if (!file) {
+    if (!userFile) {
       return null;
     }
 
     return {
-      data: file.buffer.toString("base64"),
-      mimeType: file.mimeType,
-      size: file.size,
-      userId: file.userId,
-      type: file.type,
+      data: userFile.buffer.toString("base64"),
+      mimeType: userFile.mimeType,
+      size: userFile.size,
+      userId: userFile.userId,
+      type: userFile.type,
+      filename: userFile.filename,
     };
   }
 
